@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     'payment',      
     'notification', 
     'security',
+    'rest_framework',
 ]
 
 MIDDLEWARE = [
