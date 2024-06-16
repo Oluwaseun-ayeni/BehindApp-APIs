@@ -1,5 +1,7 @@
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
 from django.db import models
+from datetime import timedelta
+from django.utils import timezone
 
 class UserManager(BaseUserManager):
     def create_user(self, email, password=None, **extra_fields):
@@ -23,11 +25,25 @@ class User(AbstractBaseUser):
     last_name = models.CharField(max_length=30, blank=True)
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
+    is_locked = models.BooleanField(default=False)
+    failed_login_attempts = models.IntegerField(default=0)
+    lockout_time = models.DateTimeField(null=True, blank=True)
 
     objects = UserManager()
 
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = []
+
+    def lock_account(self):
+        self.is_locked = True
+        self.lockout_time = timezone.now() + timedelta(minutes=15)
+        self.save()
+
+    def unlock_account(self):
+        self.is_locked = False
+        self.failed_login_attempts = 0
+        self.lockout_time = None
+        self.save()
 
     def __str__(self):
         return self.email

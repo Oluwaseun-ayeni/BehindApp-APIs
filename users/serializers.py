@@ -2,14 +2,16 @@ from rest_framework import serializers
 from .models import User, Profile
 from django.contrib.auth.password_validation import validate_password
 from rest_framework_simplejwt.tokens import RefreshToken
+from security.models import IPAddress
 
 class UserRegisterSerializer(serializers.ModelSerializer):
+    ip_address = serializers.IPAddressField(write_only=True, required=False, default='127.0.0.1')
     profile_bio = serializers.CharField(max_length=255, required=False)
     profile_picture = serializers.ImageField(required=False)
 
     class Meta:
         model = User
-        fields = ['email', 'first_name', 'last_name', 'password', 'profile_bio', 'profile_picture']
+        fields = ['email', 'first_name', 'last_name', 'password', 'profile_bio', 'profile_picture', 'ip_address']
 
     def validate_password(self, value):
         validate_password(value)
@@ -18,6 +20,7 @@ class UserRegisterSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         bio = validated_data.pop('profile_bio', None)
         picture = validated_data.pop('profile_picture', None)
+        ip_address = validated_data.pop('ip_address', '127.0.0.1')
 
         # Create the user instance with hashed password
         user = User(
@@ -25,8 +28,11 @@ class UserRegisterSerializer(serializers.ModelSerializer):
             first_name=validated_data['first_name'],
             last_name=validated_data['last_name']
         )
+       
         user.set_password(validated_data['password'])
         user.save()
+
+        IPAddress.objects.create(user=user, ip_address=ip_address)
 
         # Create the profile associated with the user
         profile = Profile.objects.create(
@@ -57,7 +63,6 @@ class UserLoginSerializer(serializers.Serializer):
             "access": str(refresh.access_token),
             "refresh": str(refresh)
         }
-
 class ProfileSerializer(serializers.ModelSerializer):
     user = serializers.StringRelatedField()
 
