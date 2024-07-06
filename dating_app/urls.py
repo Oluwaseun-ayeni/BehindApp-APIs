@@ -26,4 +26,5 @@ urlpatterns = [
     # path('api/notifications/', include('notification.urls')),  
     path('api/security/', include('security.urls')),  
     path('api/payment/', include('payment.urls')), 
+    path(r'^keycloak/', include('django_keycloak.urls')),
 ]
