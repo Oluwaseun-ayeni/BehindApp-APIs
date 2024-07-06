@@ -3,31 +3,19 @@ from pathlib import Path
 import environ
 from datetime import timedelta
 
-# Initialize environment variables
 env = environ.Env()
 environ.Env.read_env(os.path.join(Path(__file__).resolve().parent.parent, '.env'))
 
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
-
-# SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = env("SECRET_KEY")
 
-
-# Stripe settings
 STRIPE_SECRET_KEY = env('STRIPE_SECRET_KEY').strip()
 STRIPE_PUBLISHABLE_KEY = env('STRIPE_PUBLISHABLE_KEY').strip()
 
-
-# SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env.bool('DEBUG')
 
 ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=[])
-
-# Application definition
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -36,20 +24,22 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'users',        
-    'chat',         
-    'match',        
-    'payment',      
-    'notification', 
+    'users',
+    'chat',
+    'match',
+    'payment',
+    'notification',
     'security',
     'rest_framework',
     'corsheaders',
     'rest_framework_simplejwt',
     'django_ratelimit',
-    'rest_framework_simplejwt.token_blacklist'
-
-
+    'rest_framework_simplejwt.token_blacklist',
+    'django_keycloak'
 ]
+
+
+
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
@@ -60,18 +50,36 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'django_keycloak.middleware.BaseKeycloakMiddleware',
     
 ]
 
+AUTHENTICATION_BACKENDS = [
+    'django_keycloak.auth.backends.KeycloakAuthorizationCodeBackend',
+]
+
+LOGIN_URL = 'keycloak_login'
+
+KEYCLOAK_CONFIG = {
+    'KEYCLOAK_SERVER_URL': env('KEYCLOAK_SERVER_URL'),
+    'KEYCLOAK_REALM': env('KEYCLOAK_REALM'),
+    'KEYCLOAK_CLIENT_ID': env('KEYCLOAK_CLIENT_ID'),
+    'KEYCLOAK_CLIENT_SECRET_KEY': env('KEYCLOAK_CLIENT_SECRET_KEY').strip(),
+    'KEYCLOAK_USERNAME': env('KEYCLOAK_USERNAME'),
+    'KEYCLOAK_PASSWORD': env('KEYCLOAK_PASSWORD'),
+}
+
+
+
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'django_keycloak.auth.backends.KeycloakAuthorizationCodeBackend',
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
+ 
 }
-
 
 CACHES = {
     'default': {
@@ -85,11 +93,8 @@ CACHES = {
 
 RATELIMIT_USE_CACHE = 'default'
 
-
-# RATELIMIT_VIEW = 'dating_app.views.ratelimited'
-
 CORS_ALLOWED_ORIGINS = [
-    # 'http://localhost:3000', # React development server
+    # Add your allowed origins here
 ]
 
 SECURE_SSL_REDIRECT = False
@@ -102,7 +107,6 @@ X_FRAME_OPTIONS = 'DENY'
 
 ACCOUNT_LOCKOUT_THRESHOLD = 5  # Number of failed login attempts before account lockout
 ACCOUNT_LOCKOUT_TIME = 15 
-
 
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=5),
@@ -161,9 +165,6 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'dating_app.wsgi.application'
 
-
-# Database
-# https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 DATABASES = {
     'default': {
         'ENGINE': env('DB_ENGINE').strip(),
@@ -176,9 +177,6 @@ DATABASES = {
 }
 
 AUTH_USER_MODEL = 'users.User'
-
-# Password validation
-# https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -195,26 +193,13 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-
-# Internationalization
-# https://docs.djangoproject.com/en/4.2/topics/i18n/
-
 LANGUAGE_CODE = 'en-us'
-
 TIME_ZONE = 'UTC'
-
 USE_I18N = True
-
 USE_TZ = True
-
-
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/4.2/howto/static-files/
 
 STATIC_URL = 'static/'
 
-# Default primary key field type
-# https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
-
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
 

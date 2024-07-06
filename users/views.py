@@ -1,94 +1,104 @@
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, redirect
 from rest_framework import status, views
 from rest_framework.response import Response
 from .serializers import UserRegisterSerializer, UserLoginSerializer, ProfileSerializer
-from .models import Profile,User
+from .models import Profile, User
 from rest_framework.permissions import AllowAny, IsAuthenticated
-from rest_framework_simplejwt.authentication import JWTAuthentication
-from rest_framework_simplejwt.tokens import  RefreshToken
+from rest_framework_simplejwt.tokens import RefreshToken
 from django_ratelimit.decorators import ratelimit
 from django.utils import timezone
-from security.models import AuditLog,Security,IPAddress
+from security.models import AuditLog, Security, IPAddress
 from django.utils.decorators import method_decorator
+from django.contrib.auth import login, logout
+from keycloak_utils import KeycloakAdmin,generate_keycloak_token
+import logging
 
-# User Registration View
-# views.py
-
-# views.py
+logger = logging.getLogger(__name__)
 
 class UserRegisterView(views.APIView):
-    permission_classes = [AllowAny]
+    permission_classes = []
 
     def post(self, request):
-        # Get the IP address from the request or use a default (e.g., '127.0.0.1' for local development)
-        ip_address = request.data.get('ip_address', '127.0.0.1')
-
         serializer = UserRegisterSerializer(data=request.data)
         if serializer.is_valid():
-            user, profile = serializer.save()
+            try:
+                user = serializer.save()
 
-            # Save the IP address associated with the user
-            IPAddress.objects.create(user=user, ip_address=ip_address)
-            
-            Security.objects.create(user=user, auth_log={}, settings={}) 
-            return Response({"message": "User registered successfully!"}, 
-                            status=status.HTTP_201_CREATED)
+                # Create user in Keycloak
+                keycloak_admin = KeycloakAdmin()
+                keycloak_admin.create_user(user.email, request.data.get('password'))
+
+                return Response({"message": "User registered successfully!"}, status=status.HTTP_201_CREATED)
+            except Exception as e:
+                return Response({"error": f"Error registering user: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
-        return Response({"error": "Invalid data", "details": serializer.errors}, 
-                        status=status.HTTP_400_BAD_REQUEST)
+        return Response({"error": "Invalid data", "details": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 
 
 class UserLoginView(views.APIView):
     permission_classes = [AllowAny]
 
-    @method_decorator(ratelimit(key='ip', rate='5/m', method=['POST'], block=True))
     def post(self, request):
         serializer = UserLoginSerializer(data=request.data)
         if serializer.is_valid():
-            user = serializer.context['user']
-            if user.is_locked:
-                if timezone.now() > user.lockout_time:
-                    user.unlock_account()
-                else:
-                    AuditLog.objects.create(user=user, action='Account lockout attempt')
-                    return Response({"error": "Account locked. Try again later."}, status=status.HTTP_403_FORBIDDEN)
+            try:
+                email = serializer.validated_data['email']
+                password = serializer.validated_data['password']
+                
+                # Authenticate with Keycloak
+                token_response = generate_keycloak_token(email, password)
+                access_token = token_response.get('access_token')
+                refresh_token = token_response.get('refresh_token')
 
-            tokens = serializer.create({'user': user})
-            user.failed_login_attempts = 0
-            user.save()
-            AuditLog.objects.create(user=user, action='Successful login')
-            return Response({"tokens": tokens}, status=status.HTTP_200_OK)
+                if not access_token or not refresh_token:
+                    logger.error("Failed to obtain tokens from Keycloak.")
+                    return Response({"error": "Failed to obtain tokens."}, status=status.HTTP_401_UNAUTHORIZED)
+
+                # Example: check if the user exists locally
+                user = User.objects.filter(email=email).first()
+                if not user:
+                    logger.error(f"User not found: {email}")
+                    return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+                # Check user lock status, etc.
+
+                return Response({"tokens": {"access": access_token, "refresh": refresh_token}}, status=status.HTTP_200_OK)
+            except Exception as e:
+                logger.exception("Error during login attempt.")
+                return Response({"error": str(e)}, status=status.HTTP_401_UNAUTHORIZED)
         else:
-            user = User.objects.filter(email=request.data.get('email')).first()
-            if user:
-                user.failed_login_attempts += 1
-                if user.failed_login_attempts >= 5:
-                    user.lock_account()
-                    AuditLog.objects.create(user=user, action='Account locked due to failed login attempts')
-                    return Response({"error": "Account locked due to too many failed login attempts. Try again later."}, status=status.HTTP_403_FORBIDDEN)
-                user.save()
-                AuditLog.objects.create(user=user, action='Failed login attempt')
-        return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+            logger.error(f"Invalid serializer data: {serializer.errors}")
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 class UserLogoutView(views.APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        # Retrieve the refresh token from the request
         refresh_token = request.data.get("refresh_token")
-
         if not refresh_token:
             return Response({"error": "Refresh token not provided."}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Parse the refresh token and mark it as blacklisted
         token = RefreshToken(refresh_token)
         token.blacklist()
 
+        # Logout from Keycloak
+        try:
+            keycloak_openid = KeycloakOpenID(
+                server_url=get_keycloak_config_value('KEYCLOAK_SERVER_URL'),
+                client_id=get_keycloak_config_value('KEYCLOAK_CLIENT_ID'),
+                realm_name=get_keycloak_config_value('KEYCLOAK_REALM'),
+                client_secret_key=get_keycloak_config_value('KEYCLOAK_CLIENT_SECRET_KEY'),
+            )
+            keycloak_openid.logout(refresh_token)
+        except Exception as e:
+            return Response({"error": f"Error logging out from Keycloak: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Logout from Django
+        logout(request)
+
         return Response({"message": "Successfully logged out."}, status=status.HTTP_200_OK)
-    
-# Profile Management View
+
+
 class UserProfileView(views.APIView):
-    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -103,9 +113,10 @@ class UserProfileView(views.APIView):
         serializer = ProfileSerializer(profile, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
-            return Response({"message": "Profile updated successfully!"}, 
-                            status=status.HTTP_200_OK)
-        
-        return Response({"error": "Invalid data", "details": serializer.errors}, 
-                        status=status.HTTP_400_BAD_REQUEST)
+            return Response({"message": "Profile updated successfully!"}, status=status.HTTP_200_OK)
+        return Response({"error": "Invalid data", "details": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+
+
+
 
