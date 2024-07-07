@@ -3,10 +3,9 @@ from rest_framework.response import Response
 from .models import Security, AuditLog, IPAddress
 from .serializers import SecuritySerializer, AuditLogSerializer, IPAddressSerializer
 from rest_framework.permissions import IsAuthenticated
-from rest_framework_simplejwt.authentication import JWTAuthentication
+
 
 class SecurityView(views.APIView):
-    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -30,7 +29,6 @@ class SecurityView(views.APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class AuditLogView(views.APIView):
-    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -39,10 +37,7 @@ class AuditLogView(views.APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
-
-
 class IPAddressView(views.APIView):
-    authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request):

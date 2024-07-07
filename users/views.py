@@ -6,12 +6,14 @@ from .models import Profile, User
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django_ratelimit.decorators import ratelimit
+from django.utils.decorators import method_decorator
 from django.utils import timezone
 from security.models import AuditLog, Security, IPAddress
-from django.utils.decorators import method_decorator
-from django.contrib.auth import login, logout
+from django.contrib.auth import  logout
 from keycloak_utils import KeycloakAdmin,generate_keycloak_token
 import logging
+from keycloak import KeycloakOpenID
+from keycloak_utils import get_keycloak_config_value
 
 logger = logging.getLogger(__name__)
 
@@ -36,16 +38,31 @@ class UserRegisterView(views.APIView):
 
 
 
+
 class UserLoginView(views.APIView):
     permission_classes = [AllowAny]
 
+    @method_decorator(ratelimit(key='ip', rate='5/m', method=['POST'], block=True))
     def post(self, request):
         serializer = UserLoginSerializer(data=request.data)
         if serializer.is_valid():
+            email = serializer.validated_data['email']
+            password = serializer.validated_data['password']
+
+            # Check if user exists
+            user = User.objects.filter(email=email).first()
+            if user:
+                if user.is_locked:
+                    if timezone.now() > user.lockout_time:
+                        user.failed_login_attempts = 0
+                        user.is_locked = False
+                        user.lockout_time = None
+                        user.save()
+                    else:
+                        AuditLog.objects.create(user=user, action='Account lockout attempt')
+                        return Response({"error": "Account locked. Try again later."}, status=status.HTTP_403_FORBIDDEN)
+
             try:
-                email = serializer.validated_data['email']
-                password = serializer.validated_data['password']
-                
                 # Authenticate with Keycloak
                 token_response = generate_keycloak_token(email, password)
                 access_token = token_response.get('access_token')
@@ -53,23 +70,50 @@ class UserLoginView(views.APIView):
 
                 if not access_token or not refresh_token:
                     logger.error("Failed to obtain tokens from Keycloak.")
+                    if user:
+                        user.failed_login_attempts += 1
+                        if user.failed_login_attempts >= 5:
+                            user.is_locked = True
+                            user.lockout_time = timezone.now() + timedelta(minutes=15)
+                            user.save()
+                            AuditLog.objects.create(user=user, action='Account locked due to failed login attempts')
+                            return Response({"error": "Account locked due to too many failed login attempts. Try again later."}, status=status.HTTP_403_FORBIDDEN)
+                        user.save()
+                        AuditLog.objects.create(user=user, action='Failed login attempt')
                     return Response({"error": "Failed to obtain tokens."}, status=status.HTTP_401_UNAUTHORIZED)
 
-                # Example: check if the user exists locally
-                user = User.objects.filter(email=email).first()
-                if not user:
-                    logger.error(f"User not found: {email}")
-                    return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+                if user:
+                    user.failed_login_attempts = 0
+                    user.save()
 
-                # Check user lock status, etc.
-
+                AuditLog.objects.create(user=user, action='Successful login')
                 return Response({"tokens": {"access": access_token, "refresh": refresh_token}}, status=status.HTTP_200_OK)
             except Exception as e:
                 logger.exception("Error during login attempt.")
+                if user:
+                    user.failed_login_attempts += 1
+                    if user.failed_login_attempts >= 5:
+                        user.is_locked = True
+                        user.lockout_time = timezone.now() + timedelta(minutes=15)
+                        user.save()
+                        AuditLog.objects.create(user=user, action='Account locked due to failed login attempts')
+                        return Response({"error": "Account locked due to too many failed login attempts. Try again later."}, status=status.HTTP_403_FORBIDDEN)
+                    user.save()
+                    AuditLog.objects.create(user=user, action='Failed login attempt')
                 return Response({"error": str(e)}, status=status.HTTP_401_UNAUTHORIZED)
         else:
-            logger.error(f"Invalid serializer data: {serializer.errors}")
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            user = User.objects.filter(email=request.data.get('email')).first()
+            if user:
+                user.failed_login_attempts += 1
+                if user.failed_login_attempts >= 5:
+                    user.is_locked = True
+                    user.lockout_time = timezone.now() + timedelta(minutes=15)
+                    user.save()
+                    AuditLog.objects.create(user=user, action='Account locked due to failed login attempts')
+                    return Response({"error": "Account locked due to too many failed login attempts. Try again later."}, status=status.HTTP_403_FORBIDDEN)
+                user.save()
+                AuditLog.objects.create(user=user, action='Failed login attempt')
+        return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 class UserLogoutView(views.APIView):
     permission_classes = [IsAuthenticated]
 
@@ -98,6 +142,7 @@ class UserLogoutView(views.APIView):
         return Response({"message": "Successfully logged out."}, status=status.HTTP_200_OK)
 
 
+
 class UserProfileView(views.APIView):
     permission_classes = [IsAuthenticated]
 
@@ -115,8 +160,4 @@ class UserProfileView(views.APIView):
             serializer.save()
             return Response({"message": "Profile updated successfully!"}, status=status.HTTP_200_OK)
         return Response({"error": "Invalid data", "details": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
-
-
-
-
 
