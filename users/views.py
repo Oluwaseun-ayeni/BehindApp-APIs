@@ -1,3 +1,4 @@
+from datetime import timedelta
 from django.shortcuts import get_object_or_404, redirect
 from rest_framework import status, views
 from rest_framework.response import Response
@@ -114,6 +115,7 @@ class UserLoginView(views.APIView):
                 user.save()
                 AuditLog.objects.create(user=user, action='Failed login attempt')
         return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+    
 class UserLogoutView(views.APIView):
     permission_classes = [IsAuthenticated]
 
