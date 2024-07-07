@@ -1,5 +1,12 @@
 import requests
 from django.conf import settings
+from rest_framework.authentication import BaseAuthentication  
+from keycloak import KeycloakOpenID
+from rest_framework.exceptions import AuthenticationFailed
+from users.models import User
+import logging
+
+logger = logging.getLogger(__name__)
 
 keycloak_config = settings.KEYCLOAK_CONFIG
 
@@ -124,6 +131,38 @@ def generate_keycloak_token(email, password):
         raise Exception(f"Error generating Keycloak token: {str(e)}")
 
 
+
+class KeycloakAuthentication(BaseAuthentication):
+    def authenticate(self, request):
+        auth_header = request.headers.get('Authorization')
+
+        if not auth_header:
+            logger.warning("Authorization header missing")
+            return None
+
+        token = auth_header.split('Bearer ')[-1]
+        keycloak_openid = KeycloakOpenID(
+            server_url=settings.KEYCLOAK_CONFIG['KEYCLOAK_SERVER_URL'],
+            client_id=settings.KEYCLOAK_CONFIG['KEYCLOAK_CLIENT_ID'],
+            realm_name=settings.KEYCLOAK_CONFIG['KEYCLOAK_REALM'],
+            client_secret_key=settings.KEYCLOAK_CONFIG['KEYCLOAK_CLIENT_SECRET_KEY']
+        )
+
+        try:
+            user_info = keycloak_openid.userinfo(token)
+            logger.info(f"User info retrieved: {user_info}")
+        except Exception as e:
+            logger.error(f"Keycloak authentication failed: {str(e)}")
+            raise AuthenticationFailed(f"Keycloak authentication failed: {str(e)}")
+
+        if 'email' not in user_info:
+            logger.error("Invalid token: missing 'email'")
+            raise AuthenticationFailed("Invalid token: missing 'email'")
+
+        email = user_info['email']
+        user, _ = User.objects.get_or_create(email=email, defaults={'first_name': user_info.get('given_name', ''), 'last_name': user_info.get('family_name', '')})
+
+        return (user, None)
 
 
 
