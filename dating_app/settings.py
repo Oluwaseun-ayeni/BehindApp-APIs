@@ -51,7 +51,6 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'django_keycloak.middleware.BaseKeycloakMiddleware',
-    
 ]
 
 AUTHENTICATION_BACKENDS = [
@@ -79,8 +78,6 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ),
 }
-
-
 
 
 

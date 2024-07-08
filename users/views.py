@@ -39,7 +39,6 @@ class UserRegisterView(views.APIView):
 
 
 
-
 class UserLoginView(views.APIView):
     permission_classes = [AllowAny]
 
@@ -115,6 +114,7 @@ class UserLoginView(views.APIView):
                 user.save()
                 AuditLog.objects.create(user=user, action='Failed login attempt')
         return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+
     
 class UserLogoutView(views.APIView):
     permission_classes = [IsAuthenticated]
@@ -123,8 +123,6 @@ class UserLogoutView(views.APIView):
         refresh_token = request.data.get("refresh_token")
         if not refresh_token:
             return Response({"error": "Refresh token not provided."}, status=status.HTTP_400_BAD_REQUEST)
-        token = RefreshToken(refresh_token)
-        token.blacklist()
 
         # Logout from Keycloak
         try:
@@ -135,11 +133,14 @@ class UserLogoutView(views.APIView):
                 client_secret_key=get_keycloak_config_value('KEYCLOAK_CLIENT_SECRET_KEY'),
             )
             keycloak_openid.logout(refresh_token)
+            logger.info("Successfully logged out from Keycloak.")
         except Exception as e:
+            logger.error(f"Error logging out from Keycloak: {str(e)}")
             return Response({"error": f"Error logging out from Keycloak: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Logout from Django
         logout(request)
+        logger.info("Successfully logged out from Django.")
 
         return Response({"message": "Successfully logged out."}, status=status.HTTP_200_OK)
 
