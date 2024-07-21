@@ -7,10 +7,15 @@ services:
       - KEYCLOAK_ADMIN=admin
       - KEYCLOAK_ADMIN_PASSWORD=admin
     ports:
-      - "8100:8080"
+      - "8080:8080"
     command: ["start-dev"]
     networks:
-      - kong-net
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
   kong-database:
     image: postgres:13
@@ -20,8 +25,10 @@ services:
       POSTGRES_PASSWORD: kong
     ports:
       - "5433:5432"
+    volumes:
+      - kong-data:/var/lib/postgresql/data
     networks:
-      - kong-net
+      - backend
 
   kong-migrations:
     image: my-kong-image:latest
@@ -43,7 +50,8 @@ services:
     depends_on:
       - kong-database
     networks:
-      - kong-net
+      - backend
+
   kong:
     image: my-kong-image:latest
     command: "/bin/sh -c 'kong migrations bootstrap && kong start'"
@@ -77,29 +85,50 @@ services:
       KONG_PLUGINS:          bundled,oidc
       KONG_LOG_LEVEL:        debug
     networks:
-      - kong-net
+      - backend
 
   django:
     build: .
-    image: my-kong-image:latest
+    image: my-django-image:latest
     command: python manage.py runserver 0.0.0.0:8000
     volumes:
       - .:/code
     working_dir: /code
     ports:
       - "8000:8000"
-    environment:
-      - POSTGRES_DB=kong
-      - POSTGRES_USER=kong
-      - POSTGRES_PASSWORD=kong
-      - POSTGRES_HOST=kong-database
-      - POSTGRES_PORT=5432
+    env_file: .env  
     networks:
-      - kong-net
+      - backend
+    depends_on:
+      - redis
+      - keycloak
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
 networks:
-  kong-net:
+  backend:
     driver: bridge
+
+volumes:
+  kong-data:
+
+
+
 
 
 
