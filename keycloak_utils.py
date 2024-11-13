@@ -38,10 +38,10 @@ class KeycloakAdmin:
                 response.raise_for_status()
                 self.admin_token = response.json().get('access_token')
             except requests.exceptions.HTTPError as e:
-                print(f"HTTP Error while getting admin token: {e}")
-                print("Response content:", response.text)
+                logger.error(f"HTTP Error while getting admin token: {e}")
+                logger.error("Response content:", response.text)
             except Exception as e:
-                print(f"Unexpected error while getting admin token: {e}")
+                logger.error(f"Unexpected error while getting admin token: {e}")
         return self.admin_token
 
     def create_user(self, email, password):
@@ -64,15 +64,15 @@ class KeycloakAdmin:
         try:
             response.raise_for_status()
             user_creation_response = response.json()
-            print("User creation response:", user_creation_response)
+            logger.info("User creation response:", user_creation_response)
             user_id = self.get_user_id_by_email(email)
             self.remove_required_actions(user_id)
             return user_creation_response
         except requests.exceptions.HTTPError as e:
-            print(f"HTTP Error while creating user: {e}")
-            print("Response content:", response.text)
+            logger.error(f"HTTP Error while creating user: {e}")
+            logger.error("Response content:", response.text)
         except Exception as e:
-            print(f"Unexpected error while creating user: {e}")
+            logger.error(f"Unexpected error while creating user: {e}")
         return None
 
     def get_user_id_by_email(self, email):
@@ -100,14 +100,12 @@ class KeycloakAdmin:
         response = requests.put(user_url, headers=headers, json=data)
         try:
             response.raise_for_status()
-            print(f"Required actions removed for user {user_id}")
+            logger.info(f"Required actions removed for user {user_id}")
         except requests.exceptions.HTTPError as e:
-            print(f"HTTP Error while removing required actions: {e}")
-            print("Response content:", response.text)
+            logger.error(f"HTTP Error while removing required actions: {e}")
+            logger.error("Response content:", response.text)
         except Exception as e:
-            print(f"Unexpected error while removing required actions: {e}")
-
-
+            logger.error(f"Unexpected error while removing required actions: {e}")
 
 def generate_keycloak_token(email, password):
     token_url = f"{keycloak_config['KEYCLOAK_SERVER_URL']}/realms/{keycloak_config['KEYCLOAK_REALM']}/protocol/openid-connect/token"
@@ -126,11 +124,9 @@ def generate_keycloak_token(email, password):
         token_response = response.json()
         return token_response
     except requests.RequestException as e:
-        print(f"Error generating Keycloak token: {str(e)}")
-        print("Response content:", response.text)
+        logger.error(f"Error generating Keycloak token: {str(e)}")
+        logger.error("Response content:", response.text)
         raise Exception(f"Error generating Keycloak token: {str(e)}")
-
-
 
 class KeycloakAuthentication(BaseAuthentication):
     def authenticate(self, request):
@@ -149,8 +145,17 @@ class KeycloakAuthentication(BaseAuthentication):
         )
 
         try:
+            openid_config_url = f"{settings.KEYCLOAK_CONFIG['KEYCLOAK_SERVER_URL']}/realms/{settings.KEYCLOAK_CONFIG['KEYCLOAK_REALM']}/.well-known/openid-configuration"
+            response = requests.get(openid_config_url)
+            response.raise_for_status()
+            openid_config = response.json()
+            logger.info(f"OpenID configuration retrieved: {openid_config}")
+
             user_info = keycloak_openid.userinfo(token)
             logger.info(f"User info retrieved: {user_info}")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching OpenID configuration: {str(e)}")
+            raise AuthenticationFailed(f"Error fetching OpenID configuration: {str(e)}")
         except Exception as e:
             logger.error(f"Keycloak authentication failed: {str(e)}")
             raise AuthenticationFailed(f"Keycloak authentication failed: {str(e)}")
@@ -163,6 +168,3 @@ class KeycloakAuthentication(BaseAuthentication):
         user, _ = User.objects.get_or_create(email=email, defaults={'first_name': user_info.get('given_name', ''), 'last_name': user_info.get('family_name', '')})
 
         return (user, None)
-
-
-

@@ -3,6 +3,10 @@ from rest_framework.response import Response
 from .models import Security, AuditLog, IPAddress
 from .serializers import SecuritySerializer, AuditLogSerializer, IPAddressSerializer
 from rest_framework.permissions import IsAuthenticated
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from .rekognition_utils import compare_faces
+from io import BytesIO
 
 
 class SecurityView(views.APIView):
@@ -74,3 +78,30 @@ class IPAddressView(views.APIView):
 
         ip.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@csrf_exempt
+def verify_kyc(request):
+    """
+    Endpoint to verify the KYC face using Rekognition.
+    """
+    if request.method == 'POST':
+        # Get images from request
+        source_image = request.FILES.get('source_image')
+        target_image = request.FILES.get('target_image')
+
+        if not source_image or not target_image:
+            return JsonResponse({'error': 'Both images are required'}, status=400)
+
+        # Convert images to bytes
+        source_image_bytes = source_image.read()
+        target_image_bytes = target_image.read()
+
+        # Compare faces using Rekognition
+        result = compare_faces(source_image_bytes, target_image_bytes)
+
+        # Return result as JSON
+        return JsonResponse(result)
+
+    else:
+        return JsonResponse({'error': 'Invalid request method'}, status=405)

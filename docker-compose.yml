@@ -89,10 +89,11 @@ services:
 
   django:
     build: .
-    image: my-django-image:latest
+    image: my-django-image:saved
     command: python manage.py runserver 0.0.0.0:8000
     volumes:
       - .:/code
+      - ./venv:/code/venv 
     working_dir: /code
     ports:
       - "8000:8000"
